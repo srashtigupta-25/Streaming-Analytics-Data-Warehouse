@@ -9,6 +9,9 @@
 rm(list = ls())
 options(warn = -1)
 
+# Load credentials (gitignored - copy from credentials_template.R)
+source("credentials.R")
+
 # ============================================================================
 # SECTION 1: Load Required Libraries
 # ============================================================================

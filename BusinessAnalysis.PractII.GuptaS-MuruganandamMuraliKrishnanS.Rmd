@@ -24,6 +24,7 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(DBI)
 library(RMySQL)
 library(knitr)
+source("credentials.R")   # loads MYSQL_HOST, MYSQL_PORT, etc.
 con <- dbConnect(
   RMySQL::MySQL(),
   host     = MYSQL_HOST,

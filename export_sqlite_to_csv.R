@@ -1,3 +1,8 @@
+# export_sqlite_to_csv.R
+# ONE-TIME UTILITY — run this only if you have the original subscribersDB.sqlitedb
+# Exports lookup tables to data/assets.csv and data/countries.csv
+# You do NOT need to run this if you already have those two CSV files
+
 library(DBI)
 library(RSQLite)
 
