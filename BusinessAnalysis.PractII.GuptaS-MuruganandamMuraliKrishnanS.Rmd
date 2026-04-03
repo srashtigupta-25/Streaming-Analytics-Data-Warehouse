@@ -1,0 +1,234 @@
+---
+title: "Analysis of Streaming Transactions"
+author:
+- Gupta Srashti
+- Sai Venkatesh Varun Muruganandam Murali Krishnan
+date: "Fall 2025"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    collapsed: true
+    number_sections: true
+    theme: paper
+    highlight: tango
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+subtitle: Based on Data Collected by SportsTV
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(DBI)
+library(RMySQL)
+library(knitr)
+con <- dbConnect(
+  RMySQL::MySQL(),
+  host     = MYSQL_HOST,
+  port     = MYSQL_PORT,
+  user     = MYSQL_USER,
+  password = MYSQL_PASSWORD,
+  dbname   = MYSQL_DBNAME
+)
+```
+
+# Executive Summary
+
+This report analyzes streaming transaction data collected by SportsTV Germany over `r dbGetQuery(con, "SELECT COUNT(DISTINCT year) as years FROM fact_streaming_summary")$years` years, encompassing `r format(dbGetQuery(con, "SELECT SUM(transaction_count) as total FROM fact_streaming_summary")$total, big.mark=",")` total streaming events. The analysis examines viewing patterns across countries, sports, and time periods to provide insights into subscriber behavior and content preferences.
+
+# Data Overview
+
+The analysis is based on streaming transaction data aggregated at the daily level by country and sport. The dataset spans from `r dbGetQuery(con, "SELECT MIN(streaming_date) as min_date FROM fact_streaming_summary")$min_date` to `r dbGetQuery(con, "SELECT MAX(streaming_date) as max_date FROM fact_streaming_summary")$max_date`, covering `r dbGetQuery(con, "SELECT COUNT(DISTINCT country) as countries FROM fact_streaming_summary")$countries` countries and `r dbGetQuery(con, "SELECT COUNT(DISTINCT sport) as sports FROM fact_streaming_summary")$sports` different sports.
+
+```{r data_summary}
+summary_stats <- dbGetQuery(con, "SELECT COUNT(DISTINCT country) as total_countries, COUNT(DISTINCT sport) as total_sports, SUM(transaction_count) as total_transactions, SUM(total_minutes_streamed) as total_minutes, MIN(streaming_date) as start_date, MAX(streaming_date) as end_date FROM fact_streaming_summary")
+total_countries <- summary_stats$total_countries
+total_sports <- summary_stats$total_sports
+total_transactions <- summary_stats$total_transactions
+total_minutes <- summary_stats$total_minutes
+total_hours <- round(total_minutes / 60, 0)
+start_date <- summary_stats$start_date
+end_date <- summary_stats$end_date
+```
+
+Key metrics:
+
+- **Total Streaming Events:** `r format(total_transactions, big.mark=",")` 
+- **Total Streaming Time:** `r format(total_hours, big.mark=",")` hours
+- **Countries Covered:** `r total_countries`
+- **Sports Covered:** `r total_sports`
+- **Date Range:** `r start_date` to `r end_date`
+
+# Growth Analysis Over Time
+
+## Streaming Patterns by Sport
+
+```{r growth_data}
+growth_data <- dbGetQuery(con, "SELECT year, sport, SUM(transaction_count) as total_transactions, SUM(total_minutes_streamed) as total_minutes FROM fact_streaming_summary GROUP BY year, sport ORDER BY year, sport")
+sport_totals <- dbGetQuery(con, "SELECT sport, SUM(transaction_count) as total_txns, SUM(total_minutes_streamed) as total_mins FROM fact_streaming_summary GROUP BY sport ORDER BY total_txns DESC")
+most_popular_sport <- sport_totals$sport[1]
+most_popular_txns <- sport_totals$total_txns[1]
+most_popular_pct <- round(most_popular_txns / total_transactions * 100, 1)
+```
+
+Over the analyzed period, **`r most_popular_sport`** emerged as the most popular sport with `r format(most_popular_txns, big.mark=",")` streaming events, representing `r most_popular_pct`% of all viewing activity.
+
+```{r growth_chart, fig.width=10, fig.height=6}
+years <- unique(growth_data$year)
+sports <- unique(growth_data$sport)
+colors <- c("#2E86AB", "#A23B72", "#F18F01")
+barplot_data <- matrix(0, nrow=length(sports), ncol=length(years))
+for(i in 1:nrow(growth_data)) {
+  sport_idx <- which(sports == growth_data$sport[i])
+  year_idx <- which(years == growth_data$year[i])
+  barplot_data[sport_idx, year_idx] <- growth_data$total_transactions[i]
+}
+barplot(barplot_data, names.arg = years, main = "Streaming Transactions by Sport and Year", xlab = "Year", ylab = "Number of Transactions", col = colors, legend.text = sports, args.legend = list(x = "topleft", bty = "n"), beside = TRUE, las = 1)
+```
+
+```{r streaming_time_chart, fig.width=10, fig.height=6}
+barplot_time <- matrix(0, nrow=length(sports), ncol=length(years))
+for(i in 1:nrow(growth_data)) {
+  sport_idx <- which(sports == growth_data$sport[i])
+  year_idx <- which(years == growth_data$year[i])
+  barplot_time[sport_idx, year_idx] <- growth_data$total_minutes[i] / 60
+}
+barplot(barplot_time, names.arg = years, main = "Total Streaming Hours by Sport and Year", xlab = "Year", ylab = "Total Hours Streamed", col = colors, legend.text = sports, args.legend = list(x = "topleft", bty = "n"), beside = TRUE, las = 1)
+```
+
+## Analysis
+
+The data reveals clear growth trends across all sports categories. Ice Hockey demonstrates the strongest viewership, which aligns with the German-speaking market's traditional affinity for winter sports. The year-over-year patterns suggest seasonal variations, with certain sports showing increased activity during their respective competitive seasons.
+
+# Recent Weekly Activity
+
+## Streaming Events Per Week
+
+```{r weekly_data}
+most_recent_year <- dbGetQuery(con, "SELECT MAX(year) as max_year FROM fact_streaming_summary")$max_year
+weekly_data <- dbGetQuery(con, paste0("SELECT week, SUM(transaction_count) as total_transactions FROM fact_streaming_summary WHERE year = ", most_recent_year, " GROUP BY week ORDER BY week"))
+peak_week <- weekly_data$week[which.max(weekly_data$total_transactions)]
+peak_week_txns <- max(weekly_data$total_transactions)
+```
+
+Analysis of the most recent year (`r most_recent_year`) shows weekly streaming patterns with peak activity in week `r peak_week`, recording `r format(peak_week_txns, big.mark=",")` streaming events.
+
+```{r weekly_chart, fig.width=10, fig.height=6}
+plot(weekly_data$week, weekly_data$total_transactions, type = "l", lwd = 2, col = "#2E86AB", main = paste("Weekly Streaming Events -", most_recent_year), xlab = "Week Number", ylab = "Number of Streaming Events", las = 1)
+grid()
+points(weekly_data$week, weekly_data$total_transactions, pch = 19, col = "#2E86AB", cex = 0.8)
+points(peak_week, peak_week_txns, pch = 19, col = "red", cex = 1.5)
+text(peak_week, peak_week_txns, labels = paste("Peak: Week", peak_week), pos = 3, col = "red", font = 2)
+```
+
+## Observations
+
+The weekly pattern reveals fluctuations that likely correspond to major sporting events and seasonal factors. Peak viewing weeks may align with championship games, playoffs, or holiday periods when viewers have increased leisure time.
+
+# Sport and Country Analysis
+
+## Average Streaming Time and Total Streams
+
+```{r country_sport_analysis}
+country_sport_data <- dbGetQuery(con, "SELECT country, sport, SUM(transaction_count) as total_streams, ROUND(AVG(avg_minutes_streamed), 2) as avg_minutes FROM fact_streaming_summary GROUP BY country, sport ORDER BY total_streams DESC")
+top_country <- country_sport_data$country[1]
+top_country_txns <- country_sport_data$total_streams[1]
+```
+
+**`r top_country`** leads in streaming activity with the highest number of total streams. The following table presents the breakdown of streaming activity by country and sport:
+
+```{r country_sport_table}
+kable(country_sport_data, col.names = c("Country", "Sport", "Total Streams", "Avg. Minutes per Stream"), caption = "Streaming Activity by Country and Sport", format.args = list(big.mark = ","), align = c("l", "l", "r", "r"))
+```
+
+```{r country_comparison_chart, fig.width=10, fig.height=6}
+country_totals <- dbGetQuery(con, "SELECT country, SUM(transaction_count) as total_streams FROM fact_streaming_summary GROUP BY country ORDER BY total_streams DESC")
+barplot(country_totals$total_streams, names.arg = country_totals$country, main = "Total Streaming Events by Country", xlab = "Country", ylab = "Total Streams", col = "#2E86AB", las = 2, cex.names = 0.8)
+```
+
+## Key Insights
+
+The distribution of streaming activity across countries reflects both population size and regional sport preferences. German-speaking countries show strong engagement with ice hockey content, while variations in average viewing time suggest different consumption patterns across markets.
+
+# Day of Week Patterns
+
+## Aggregate Analysis (Past Three Years)
+
+```{r day_of_week_data}
+current_year <- as.integer(format(Sys.Date(), "%Y"))
+dow_data <- dbGetQuery(con, paste0("SELECT day_of_week, SUM(total_minutes_streamed) as total_minutes FROM fact_streaming_summary WHERE year >= ", current_year - 3, " GROUP BY day_of_week ORDER BY day_of_week"))
+day_names <- c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+dow_data$day_name <- day_names[dow_data$day_of_week]
+peak_day_idx <- which.max(dow_data$total_minutes)
+peak_day <- dow_data$day_name[peak_day_idx]
+peak_day_hours <- round(dow_data$total_minutes[peak_day_idx] / 60, 0)
+```
+
+Aggregating streaming time over the past three years reveals that **`r peak_day`** is the most popular viewing day, with `r format(peak_day_hours, big.mark=",")` total hours streamed.
+
+```{r dow_aggregate_chart, fig.width=10, fig.height=6}
+barplot(dow_data$total_minutes / 60, names.arg = dow_data$day_name, main = "Total Streaming Hours by Day of Week (Past 3 Years)", xlab = "Day of Week", ylab = "Total Hours Streamed", col = "#A23B72", las = 2, cex.names = 0.9)
+rect(peak_day_idx - 0.5, 0, peak_day_idx + 0.5, dow_data$total_minutes[peak_day_idx] / 60, col = "#F18F01", border = NA)
+```
+
+## Day of Week by Sport
+
+```{r dow_by_sport}
+dow_sport_data <- dbGetQuery(con, paste0("SELECT day_of_week, sport, SUM(total_minutes_streamed) as total_minutes FROM fact_streaming_summary WHERE year >= ", current_year - 3, " GROUP BY day_of_week, sport ORDER BY day_of_week, sport"))
+dow_sport_data$day_name <- day_names[dow_sport_data$day_of_week]
+```
+
+```{r dow_sport_chart, fig.width=10, fig.height=6}
+sports_list <- unique(dow_sport_data$sport)
+dow_sport_matrix <- matrix(0, nrow=length(sports_list), ncol=7)
+for(i in 1:nrow(dow_sport_data)) {
+  sport_idx <- which(sports_list == dow_sport_data$sport[i])
+  dow_idx <- dow_sport_data$day_of_week[i]
+  dow_sport_matrix[sport_idx, dow_idx] <- dow_sport_data$total_minutes[i] / 60
+}
+barplot(dow_sport_matrix, names.arg = day_names, main = "Streaming Hours by Day of Week and Sport (Past 3 Years)", xlab = "Day of Week", ylab = "Total Hours Streamed", col = colors, legend.text = sports_list, args.legend = list(x = "topleft", bty = "n"), beside = TRUE, las = 2, cex.names = 0.8)
+```
+
+## Day of Week by Country
+
+```{r dow_by_country}
+dow_country_data <- dbGetQuery(con, paste0("SELECT day_of_week, country, SUM(total_minutes_streamed) as total_minutes FROM fact_streaming_summary WHERE year >= ", current_year - 3, " GROUP BY day_of_week, country ORDER BY day_of_week, total_minutes DESC"))
+dow_country_data$day_name <- day_names[dow_country_data$day_of_week]
+top_countries <- dbGetQuery(con, "SELECT country, SUM(transaction_count) as total FROM fact_streaming_summary GROUP BY country ORDER BY total DESC LIMIT 3")$country
+dow_country_subset <- dow_country_data[dow_country_data$country %in% top_countries, ]
+```
+
+```{r dow_country_chart, fig.width=10, fig.height=6}
+country_colors <- c("#2E86AB", "#A23B72", "#F18F01")
+dow_country_matrix <- matrix(0, nrow=length(top_countries), ncol=7)
+for(i in 1:nrow(dow_country_subset)) {
+  country_idx <- which(top_countries == dow_country_subset$country[i])
+  dow_idx <- dow_country_subset$day_of_week[i]
+  dow_country_matrix[country_idx, dow_idx] <- dow_country_subset$total_minutes[i] / 60
+}
+barplot(dow_country_matrix, names.arg = day_names, main = "Streaming Hours by Day of Week - Top 3 Countries (Past 3 Years)", xlab = "Day of Week", ylab = "Total Hours Streamed", col = country_colors, legend.text = top_countries, args.legend = list(x = "topleft", bty = "n"), beside = TRUE, las = 2, cex.names = 0.8)
+```
+
+## Discussion
+
+The day-of-week analysis reveals distinct viewing patterns, with weekend days showing elevated streaming activity. This pattern is consistent across sports categories, though the magnitude varies. Regional differences suggest that viewing habits may be influenced by cultural factors, work schedules, and local broadcasting traditions. The concentration of viewing on weekends indicates that streaming primarily serves recreational rather than professional purposes.
+
+# Conclusions
+
+The analysis of SportsTV's streaming data reveals several key findings:
+
+1. **Content Preferences:** `r most_popular_sport` dominates the platform with `r most_popular_pct`% of total streaming activity, indicating strong viewer affinity for this content.
+
+2. **Geographic Distribution:** `r top_country` leads in streaming activity, suggesting either higher subscriber density or increased engagement in this market.
+
+3. **Temporal Patterns:** Viewing activity peaks on `r peak_day`, with `r format(peak_day_hours, big.mark=",")` hours of content consumed on this day over the past three years.
+
+4. **Growth Trajectory:** The year-over-year data shows sustained engagement across all sports categories, with seasonal variations reflecting competitive calendars.
+
+These insights can inform content acquisition strategies, marketing initiatives, and platform optimization efforts to better serve the subscriber base and drive continued growth.
+
+```{r cleanup, include=FALSE}
+dbDisconnect(con)
+```
